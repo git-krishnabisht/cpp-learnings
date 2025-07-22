@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <string>
 #include <fstream>
+#include <sstream>
 
 using std::cerr;
 using std::cout;
@@ -16,25 +17,105 @@ void error(const char* err_msg) {
   exit(1);
 }
 
-void http_get(std::string buffer, int clisockfd) {
+/* GET /index.html HTTP/1.1
+Host:kkhk localhost:50136
+User-Agent: curl/8.5.0
+Accept:
+*/
 
-  std::ofstream osf("http_logs.txt");
-  if (!osf) error("ERROR while opening the file");
-  osf << buffer;
+/* HTTP/1.1 200 OK\r\n
+Content-Type: text/html\r\n
+Content-Length: <size_of_file>\r\n
+Connection: close\r\n
+\r\n
+<file contents here> */
 
-  string body = "<html><body><p>hellow world <p/></body></html>";
-  string headers =
-    "HTTP/1.1 200 OK\r\n"
-    "Content-Type: text/html; charset=UTF-8\r\n"
-    "Content-Length: " + std::to_string(body.size()) + "\r\n"
-    "Connection: close\r\n\r\n";
+void http_get(string buffer, int clisockfd) {
 
-  string res = headers + body;
+  // std::ofstream osf("http_logs.txt");
+  // if (!osf) error("ERROR while opening the file");
+  // osf << buffer;
 
-  int _io = send(clisockfd, res.c_str(), res.size(), 0);
+  int io;
 
-  if (_io < 0) error("ERROR while writing to the client socket");
-  return;
+  string res_body;
+  string res_status_code;
+  string res_content_type;
+  string res_connection;
+  string res_content_length;
+  string res_headers;
+  string res;
+
+  if (buffer.substr(0, 6) == "GET / ") {
+
+    std::ifstream inf("index.html");
+    if (!inf) error("ERROR while opening the file");
+
+    string line;
+    while (getline(inf, line)) {
+      res_body += line + "\n";
+    }
+
+    res_status_code = "200 OK";
+    res_content_type = "text/html;";
+    res_connection = "close";
+    res_content_length = std::to_string(res_body.size());
+
+    string method, path, version;
+
+    std::istringstream iss(buffer);
+    iss >> method >> path >> version;
+
+    res_headers =
+      version + " " + res_status_code + "\r\n"
+      "Content-Type: " + res_content_type + "\r\n"
+      "Content-Length: " + res_content_length + "\r\n"
+      "Connection: " + res_connection + "\r\n\r\n";
+
+    res = res_headers + res_body;;
+
+    io = send(clisockfd, res.c_str(), res.size(), 0);
+    if (io < 0) error("ERROR while writing to the client socket");
+
+    return;
+  }
+  else {
+    string method, _path, version;
+
+    std::istringstream iss(buffer);
+    iss >> method >> _path >> version;
+
+    string path;
+    for (int i = 1; i < _path.size(); ++i) {
+      path += _path[i];
+    }
+
+    std::ifstream inf(path);
+    if (!inf) error("ERROR while opening the file");
+
+    string line;
+    while (getline(inf, line)) {
+      res_body += line + "\n";
+    }
+
+    res_status_code = "200 OK";
+    res_content_type = "text/html;";
+    res_content_length = std::to_string(res_body.size());
+    res_connection = "close";
+
+    res_headers =
+      version + " " + res_status_code + "\r\n"
+      "Content-Type: " + res_content_type + "\r\n"
+      "Content-Length: " + res_content_length + "\r\n"
+      "Connection: " + res_connection + "\r\n\r\n";
+
+    res = res_headers + res_body;
+
+    io = send(clisockfd, res.c_str(), res.size(), 0);
+    if (io < 0) error("ERROR while writing to the client socket");
+
+    return;
+  }
 }
 
 void http_post(string buffer) {
@@ -81,7 +162,7 @@ int main(int argc, char* argv[]) {
 
   string req_str_buffer(req_buffer);
 
-  if (req_str_buffer.substr(0, 6) == "GET / ") {
+  if (req_str_buffer.substr(0, 4) == "GET ") {
     http_get(req_str_buffer, clisockfd);
   }
 
