@@ -38,7 +38,6 @@ int main(int argc, char* argv[]) {
   memset(&ai, 0, sizeof(ai));
   ai.ai_family = AF_INET;
   ai.ai_socktype = SOCK_STREAM;
-  ai.ai_addr = INADDR_ANY;
 
   int status = getaddrinfo("kanyewest", argv[1], &ai, &res);
   if (status != 0) {
