@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <thread>
 
 using std::cout;
 using std::cin;
@@ -20,13 +21,30 @@ void error(const char* msg) {
   exit(1);
 }
 
+auto handle_client(int clisockfd) {
+  char buffer[256];
+  memset(&buffer, 0, 256);
+
+  int n = recv(clisockfd, buffer, 255, 0);
+  if (n < 0) {
+    error("ERROR reading from client socket");
+    close(clisockfd);
+    return;
+  }
+
+  cout << "Here is the message: " << buffer << endl;
+
+  n = send(clisockfd, "I got your message", 18, 0);
+  if (n < 0) perror("ERROR writing to socket");
+
+  shutdown(clisockfd, SHUT_RDWR);
+  close(clisockfd);
+}
+
 int main(int argc, char* argv[]) {
 
   int sockfd;
   int clisockfd;
-  struct sockaddr_storage cli_addr;
-  socklen_t cli_len = sizeof cli_addr;
-  char buffer[256];
   struct addrinfo ai, * res;
   int n;
 
@@ -39,7 +57,7 @@ int main(int argc, char* argv[]) {
   ai.ai_family = AF_INET;
   ai.ai_socktype = SOCK_STREAM;
 
-  int status = getaddrinfo("kanyewest", argv[1], &ai, &res);
+  int status = getaddrinfo("localhost", argv[1], &ai, &res);
   if (status != 0) {
     cerr << "getaddrinfo: " << gai_strerror(status) << "\n";
     exit(0);
@@ -55,11 +73,6 @@ int main(int argc, char* argv[]) {
   if (listen(sockfd, 5) < 0)
     error("ERROR while listening");
 
-  clisockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &cli_len);
-
-  if (clisockfd < 0)
-    error("ERROR on accept");
-
   /* struct sockaddr_in peer_addr {};
   socklen_t peer_len = sizeof(peer_addr);
   if (getpeername(newsockfd, (struct sockaddr*)&peer_addr, &peer_len) == 0) {
@@ -71,18 +84,20 @@ int main(int argc, char* argv[]) {
     perror("getpeername");
   } */
 
-  std::memset(buffer, 0, 256);
-  n = recv(clisockfd, buffer, 255, 0);
-  if (n < 0) error("ERROR reading from socket");
+  while (true) {
+    struct sockaddr_storage cli_addr;
+    socklen_t cli_len = sizeof cli_addr;
 
-  cout << "Here is the message: " << buffer << endl;
+    int clisockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &cli_len);
+    if (clisockfd < 0) {
+      error("ERROR on accept");
+      continue;
+    }
 
-  n = send(clisockfd, "I got your message", 18, 0);
-  if (n < 0) error("ERROR writing to socket");
+    std::thread(handle_client, clisockfd).detach();
+  }
 
-  if (shutdown(clisockfd, 2) < 0) cout << "Error shutting down newsockfd" << endl;
-  if (shutdown(sockfd, 2) < 0) cout << "Error shutting down sockfd" << endl;
-  close(clisockfd);
+  cout << "Socket closed" << endl;
   close(sockfd);
   return 0;
 }

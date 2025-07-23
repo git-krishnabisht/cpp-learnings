@@ -6,6 +6,7 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 using std::cerr;
 using std::cout;
@@ -17,24 +18,11 @@ void error(const char* err_msg) {
   exit(1);
 }
 
-/* GET /index.html HTTP/1.1
-Host:kkhk localhost:50136
-User-Agent: curl/8.5.0
-Accept:
-*/
+void http_get(string buffer, int clisockfd, string method, string path, string version) {
 
-/* HTTP/1.1 200 OK\r\n
-Content-Type: text/html\r\n
-Content-Length: <size_of_file>\r\n
-Connection: close\r\n
-\r\n
-<file contents here> */
-
-void http_get(string buffer, int clisockfd) {
-
-  // std::ofstream osf("http_logs.txt");
-  // if (!osf) error("ERROR while opening the file");
-  // osf << buffer;
+  std::ofstream osf("http_logs.txt");
+  if (!osf) error("ERROR while opening the file");
+  osf << buffer;
 
   int io;
 
@@ -46,50 +34,7 @@ void http_get(string buffer, int clisockfd) {
   string res_headers;
   string res;
 
-  if (buffer.substr(0, 6) == "GET / ") {
-
-    std::ifstream inf("index.html");
-    if (!inf) error("ERROR while opening the file");
-
-    string line;
-    while (getline(inf, line)) {
-      res_body += line + "\n";
-    }
-
-    res_status_code = "200 OK";
-    res_content_type = "text/html;";
-    res_connection = "close";
-    res_content_length = std::to_string(res_body.size());
-
-    string method, path, version;
-
-    std::istringstream iss(buffer);
-    iss >> method >> path >> version;
-
-    res_headers =
-      version + " " + res_status_code + "\r\n"
-      "Content-Type: " + res_content_type + "\r\n"
-      "Content-Length: " + res_content_length + "\r\n"
-      "Connection: " + res_connection + "\r\n\r\n";
-
-    res = res_headers + res_body;;
-
-    io = send(clisockfd, res.c_str(), res.size(), 0);
-    if (io < 0) error("ERROR while writing to the client socket");
-
-    return;
-  }
-  else {
-    string method, _path, version;
-
-    std::istringstream iss(buffer);
-    iss >> method >> _path >> version;
-
-    string path;
-    for (int i = 1; i < _path.size(); ++i) {
-      path += _path[i];
-    }
-
+  auto header_parser = [&](string path) {
     std::ifstream inf(path);
     if (!inf) error("ERROR while opening the file");
 
@@ -109,7 +54,24 @@ void http_get(string buffer, int clisockfd) {
       "Content-Length: " + res_content_length + "\r\n"
       "Connection: " + res_connection + "\r\n\r\n";
 
-    res = res_headers + res_body;
+    return res_headers + res_body;
+  };
+
+  if (path == "/") {
+    res = header_parser("index.html");
+
+    io = send(clisockfd, res.c_str(), res.size(), 0);
+    if (io < 0) error("ERROR while writing to the client socket");
+
+    return;
+  }
+  else {
+    string _path;
+    for (int i = 1; i < path.size(); ++i) {
+      _path += path[i];
+    }
+
+    res = header_parser(_path);
 
     io = send(clisockfd, res.c_str(), res.size(), 0);
     if (io < 0) error("ERROR while writing to the client socket");
@@ -122,12 +84,29 @@ void http_post(string buffer) {
   cout << "hellow " << buffer << endl;;
 }
 
+auto handle_client(int clisockfd) {
+  char req_buffer[4096];
+  memset(&req_buffer, 0, 4096);
+  int io = recv(clisockfd, req_buffer, 4095, 0);
+  if (io < 0) error("ERROR reading from the client socket");
+
+  std::istringstream iss(req_buffer);
+  string method, path, version;
+
+  iss >> method >> path >> version;
+
+  if (method == "GET") {
+    http_get(req_buffer, clisockfd, method, path, version);
+  }
+
+  close(clisockfd);
+}
+
 int main(int argc, char* argv[]) {
   int sockfd;
   int clisockfd;
   struct addrinfo ai, * res;
   struct sockaddr_storage cli_addr;
-  char req_buffer[4096];
   int _io;
   socklen_t cli_len = sizeof cli_addr;
   int _ai_status;
@@ -151,28 +130,19 @@ int main(int argc, char* argv[]) {
 
   if (listen(sockfd, 5) < 0) error("ERROR while listening");
 
-  clisockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &cli_len);
+  while (true) {
+    struct sockaddr_storage cli_addr;
+    socklen_t cli_len = sizeof cli_addr;
 
-  if (clisockfd < 0) error("ERROR accepting client reqeust");
+    int clisockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &cli_len);
+    if (clisockfd < 0) {
+      error("ERROR on accept");
+      continue;
+    }
 
-  memset(&req_buffer, 0, 4096);
-
-  _io = recv(clisockfd, req_buffer, 4095, 0);
-  if (_io < 0) error("ERROR reading from the client socket");
-
-  string req_str_buffer(req_buffer);
-
-  if (req_str_buffer.substr(0, 4) == "GET ") {
-    http_get(req_str_buffer, clisockfd);
+    std::thread(handle_client, clisockfd).detach();
   }
 
-  cout << "200 OK" << endl;
-
-  if (req_str_buffer.substr(0, 5) == "POST ") {
-    http_post(req_str_buffer);
-  }
-
-  close(clisockfd);
   close(sockfd);
 
   return 0;
