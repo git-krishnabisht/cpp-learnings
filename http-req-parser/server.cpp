@@ -18,6 +18,35 @@ void error(const char* err_msg) {
   exit(1);
 }
 
+string path_not_found(const string& version) {
+  string res_body = "<html><body>404 Not Found</body></html>\n";
+  string res_headers =
+    version + " 404 Not Found\r\n"
+    "Content-Type: text/html;\r\n"
+    "Content-Length: " + std::to_string(res_body.size()) + "\r\n"
+    "Connection: close\r\n\r\n";
+  return res_headers + res_body;
+}
+
+string header_parser(const string& filepath, const string& version) {
+
+  std::ifstream inf(filepath);
+  if (!inf) return path_not_found(version);
+
+  string res_body, line;
+  while (getline(inf, line)) {
+    res_body += line + "\n";
+  }
+
+  string res_headers =
+    version + " 200 OK\r\n"
+    "Content-Type: text/html;\r\n"
+    "Content-Length: " + std::to_string(res_body.size()) + "\r\n"
+    "Connection: close\r\n\r\n";
+
+  return res_headers + res_body;
+}
+
 void http_get(string buffer, int clisockfd, string method, string path, string version) {
 
   std::ofstream osf("http_logs.txt");
@@ -25,53 +54,23 @@ void http_get(string buffer, int clisockfd, string method, string path, string v
   osf << buffer;
 
   int io;
-
-  string res_body;
-  string res_status_code;
-  string res_content_type;
-  string res_connection;
-  string res_content_length;
-  string res_headers;
   string res;
 
-  auto header_parser = [&](string path) {
-    std::ifstream inf(path);
-    if (!inf) error("ERROR while opening the file");
-
-    string line;
-    while (getline(inf, line)) {
-      res_body += line + "\n";
-    }
-
-    res_status_code = "200 OK";
-    res_content_type = "text/html;";
-    res_content_length = std::to_string(res_body.size());
-    res_connection = "close";
-
-    res_headers =
-      version + " " + res_status_code + "\r\n"
-      "Content-Type: " + res_content_type + "\r\n"
-      "Content-Length: " + res_content_length + "\r\n"
-      "Connection: " + res_connection + "\r\n\r\n";
-
-    return res_headers + res_body;
-  };
-
   if (path == "/") {
-    res = header_parser("index.html");
+    res = header_parser("index.html", version);
 
     io = send(clisockfd, res.c_str(), res.size(), 0);
     if (io < 0) error("ERROR while writing to the client socket");
 
     return;
-  }
-  else {
-    string _path;
-    for (int i = 1; i < path.size(); ++i) {
-      _path += path[i];
-    }
+  } else {
+    string safe_path = path.substr(1);
 
-    res = header_parser(_path);
+    if (safe_path.find("..") != string::npos) {
+      res = path_not_found(version);
+    } else {
+      res = header_parser(safe_path, version);
+    }
 
     io = send(clisockfd, res.c_str(), res.size(), 0);
     if (io < 0) error("ERROR while writing to the client socket");
@@ -81,7 +80,7 @@ void http_get(string buffer, int clisockfd, string method, string path, string v
 }
 
 void http_post(string buffer) {
-  cout << "hellow " << buffer << endl;;
+  cout << "HTTP POST: " << buffer << endl;;
 }
 
 auto handle_client(int clisockfd) {
